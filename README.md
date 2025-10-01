@@ -4,9 +4,7 @@
 
 ##### paddle
 
-```
-https://www.paddlepaddle.org.cn/install/quick?docurl=/documentation/docs/zh/develop/install/pip/windows-pip.html
-```
+[https://www.paddlepaddle.org.cn/install/quick?docurl=/documentation/docs/zh/develop/install/pip/windows-pip.html](https://www.paddlepaddle.org.cn/install/quick?docurl=/documentation/docs/zh/develop/install/pip/windows-pip.html)
 
 安装paddle gpu版本需要对应cuda驱动版本，查看cuda版本方法之一：
 
