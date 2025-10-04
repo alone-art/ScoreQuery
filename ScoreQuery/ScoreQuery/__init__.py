@@ -142,8 +142,13 @@ def extract_vaild_info(info):
             if len(values) < 2:
                 if '%' in txt:
                     values.append(txt)
-                elif txt.isdigit() and int(txt) <= 2280 and int(txt) >= 30:
-                    values.append(txt)
+                else:
+                    try:
+                        v = int(txt)
+                        if v <= 2280 and v >= 30:
+                            values.append(txt)
+                    except ValueError:
+                        pass
             elif txt in valid_values:
                 values.append(txt)
 
