@@ -2,6 +2,7 @@ import base64
 import httpx
 from io import BytesIO
 import re
+import json
 
 from paddleocr import PaddleOCR
 from PIL import Image, ImageDraw, ImageEnhance
@@ -9,7 +10,7 @@ import numpy
 
 from gsuid_core.sv import SV, get_plugin_available_prefix
 from gsuid_core.bot import Bot
-from gsuid_core.models import Event
+from gsuid_core.models import Event, Message
 from gsuid_core.logger import logger
 from gsuid_core.utils.image.convert import convert_img
 
@@ -84,6 +85,37 @@ async def get_image(ev: Event):
             and content.data.startswith("http")
         ):
             res.append(content.data)
+        elif (
+            content.type == "reply_content"
+            and content.data
+            and isinstance(content.data, str)
+        ):
+            try:
+                json_obj = json.loads(content.data)
+                msgs = json_obj["message"]
+                if isinstance(msgs, list):
+                    for msg in msgs:
+                        if not isinstance(msg, dict):
+                            logger.warning(f"消息 {i} 不是字典类型: {type(msg)}")
+                            break
+                        if (
+                            msg["type"] == "img"
+                            and isinstance(msg["data"], dict)
+                            and isinstance(msg["data"]["url"], str)
+                            and msg["data"]["url"].startswith("http")
+                        ):
+                            res.append(msg["data"]["url"])
+                        elif (
+                            msg["type"] == "image"
+                            and isinstance(msg["data"], dict)
+                            and isinstance(msg["data"]["url"], str)
+                            and msg["data"]["url"].startswith("http")
+                        ):
+                            res.append(msg["data"]["url"])
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON 解析失败: {e}, 原始数据: {content.data}")
+            except Exception as e:
+                logger.error(f"处理消息时发生错误: {e}")
 
     if not res and ev.image:
         res.append(ev.image)
@@ -262,34 +294,55 @@ async def score_phantom_handler(bot: Bot, ev: Event):
     """
     处理声骸查分请求，调用外部 API 并返回结果。
     """
+    cost = 0
+    char_name: str = None
+    specify_image: int = 0
+
+    command_str = ev.text.strip().split("查分", 1)[-1].strip()
+    # logger.info(f"命令内容: {command_str}")
+
+    parts = command_str.split()
+    for i, part in enumerate(parts):
+        if i == 0:
+            for index, v in enumerate(["1c", "3c", "4c"]):
+                if v in part:
+                    part = part.replace(v, "")
+                    cost = [1,3,4][index]
+                    break
+                    
+            char_name = alias_to_char_name(part)
+            logger.info(f"角色名: {char_name}, cost: {cost}")
+
+            char_id = char_name_to_char_id(char_name)
+            if not char_id:
+                await bot.send(f"[鸣潮] 角色名【{part}】无法找到, 可能暂未适配, 请先检查输入是否正确！\n", at_sender=True)
+                return
+        elif i == 1:
+            number_part = part.split("图", 1)[-1]
+            try:
+                specify_image = int(number_part)
+            except ValueError:
+                pass
+                
     upload_images = await get_image(ev)
     if not upload_images:
         await bot.send("请在发送命令的同时附带需要查分的声骸截图哦", at_sender=True)
         return
-
-    cost = 0
-    command_str = ev.text.strip().split("查分", 1)[-1].strip()
-    # logger.info(f"命令内容: {command_str}")
-
-    for index, v in enumerate(["1c", "3c", "4c"]):
-        if v in command_str:
-            command_str = command_str.replace(v, "")
-            cost = [1,3,4][index]
-            break
             
-    char_name = alias_to_char_name(command_str)
-    logger.info(f"角色名: {char_name}, cost: {cost}")
-
-    char_id = char_name_to_char_id(char_name)
-    if not char_id:
-        await bot.send(f"[鸣潮] 角色名【{command_str}】无法找到, 可能暂未适配, 请先检查输入是否正确！\n", at_sender=True)
+    if not char_name:
+        # await bot.send(f"未指定角色, 将使用默认角色(守岸人)评分模板\n", at_sender=True)
+        # char_name = "守岸人"
+        bot.send(f"请指明角色, 如查分守岸人\n", at_sender=True)
         return
-        
+
     calc_temp = get_calc_map({}, char_name, -1)
 
     try:
         async with httpx.AsyncClient() as client:
-            for image_url in upload_images:
+            for index, image_url in enumerate(upload_images):
+                if ev.reply and specify_image:
+                    if not index == specify_image - 1:
+                        continue
                 # 下载图片
                 resp = await client.get(image_url)
                 resp.raise_for_status()
@@ -332,7 +385,7 @@ async def score_phantom_handler(bot: Bot, ev: Event):
                             await bot.send(ph_img, at_sender=True)
                         else:
                             if cost == 0:
-                                await bot.send(f"未识别cost级别, 请指明, 如查分{command_str}1c\n", at_sender=True)
+                                await bot.send(f"未识别cost级别, 请指明, 如查分守岸人1c\n", at_sender=True)
                             else:
                                 ph_img = await draw_ph(char_name, props, cost, calc_temp)
                                 ph_img = await convert_img(ph_img)
